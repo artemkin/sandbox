@@ -1,4 +1,13 @@
 
+(*
+ * TODO
+ * It seems we need to support trailing backslashes:
+ * 1. "C:\\DIR1\\" - valid dir name
+ * 2. "C:\\DIR1\\" - invalid file name
+ * 3. "C:\\DIR1.TXT" - valid file name
+ * 4. "C:\\DIR1.TXT\\" - invalid file name
+*)
+
 open Core.Std
 
 type kind = Absolute | Relative
