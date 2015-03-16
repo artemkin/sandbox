@@ -1,0 +1,4 @@
+PKG core_kernel
+S .
+B _build
+
