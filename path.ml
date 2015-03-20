@@ -56,7 +56,6 @@ let parse_and_validate_path path =
   loop [] ~first:true ~absolute:false path
 
 let of_string str =
-  String.uppercase str
-  |> String.split ~on:'\\'
+  String.split str ~on:'\\'
   |> parse_and_validate_path
 
