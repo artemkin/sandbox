@@ -27,4 +27,6 @@ def run(script, expected):
     if expected[1:] != stdout:
         print sys.argv[0], "Wrong test output. See diff"
         print _unidiff_output(expected[1:], stdout)
+    else:
+        sys.stdout.write('.')
 
