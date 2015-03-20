@@ -37,8 +37,7 @@ let create_dir node path =
             Some (Dir nodes)
           | _, _ -> Some node
       in
-      loop node path
-    )
+      loop node path)
 
 let create_file node path =
   with_return (fun r ->
@@ -74,12 +73,11 @@ let rec print_nodes prefix nodes =
            print_name prefix key;
            let prefix = prefix ^ (if last then "    " else "|   ") in
            print_nodes prefix nodes;
-           Map.length nodes = 0
-        )
+           Map.length nodes = 0)
       in
-      if last && completed then print_endline prefix;
-      i - 1
-    ))
+      let prefix = String.rstrip prefix in
+      if last && completed && String.length prefix > 0 then print_endline prefix;
+      i - 1))
 
 let create drive =
   let empty = Dir String.Map.empty in
