@@ -56,8 +56,8 @@ let rec print_nodes prefix nodes =
            print_nodes prefix nodes;
            Map.length nodes = 0)
       in
-      let prefix = String.rstrip prefix in
-      if last && completed && String.length prefix > 0 then print_endline prefix;
+      let prefix = if last then String.rstrip prefix else (prefix ^ "|") in
+      if completed && String.length prefix > 0 then print_endline prefix;
       i - 1))
 
 let create drive =
@@ -84,22 +84,51 @@ let make_dir t path =
   with_parsed_path t path ~f:(fun path name ->
       let path = path @ [name] in
       modify_node t.root path ~f:(function
-        | Some _ -> `Error
-        | None -> `Create_or_modify (Dir String.Map.empty))
+          | Some _ -> `Error
+          | None -> `Create_or_modify (Dir String.Map.empty))
       |> function
-        | None -> Error `Wrong_path
-        | Some root -> Ok { t with root })
+      | None -> Error `Wrong_path
+      | Some root -> Ok { t with root })
 
 let make_file t path =
   with_parsed_path t path ~f:(fun path name ->
       let path = path @ [name] in
       modify_node t.root path ~f:(function
-        | Some _ -> `Error
-        | None -> `Create_or_modify File)
+          | Some _ -> `Error
+          | None -> `Create_or_modify File)
       |> function
+      | None -> Error `Wrong_path
+      | Some root -> Ok { t with root })
+
+let remove_dir t path =
+  with_parsed_path t path ~f:(fun path name ->
+      let path = path @ [name] in
+      if path = t.cd then Error `Can't_remove_current_directory
+      else
+        modify_node t.root path ~f:(function
+            | None -> `Error (* not found *)
+            | Some node ->
+              match node with
+              | File -> `Error (* can't remove file *)
+              | Dir nodes ->
+                if Map.length nodes <> 0 then `Error (* dir is not empty *)
+                else `Remove)
+        |> function
         | None -> Error `Wrong_path
         | Some root -> Ok { t with root })
 
+let remove_file t path =
+  with_parsed_path t path ~f:(fun path name ->
+      let path = path @ [name] in
+      modify_node t.root path ~f:(function
+          | None -> `Error (* not found *)
+          | Some node ->
+            match node with
+            | Dir _ -> `Error (* can't remove dir *)
+            | File -> `Remove)
+      |> function
+      | None -> Error `Wrong_path
+      | Some root -> Ok { t with root })
 
 let print t drive =
   match Map.find_exn t.root drive with

@@ -17,10 +17,10 @@ C:
 |_DIR1
     |_DIR2
     |   |_DIR3
-    |       |_README.TXT
+    |       |_readme.txt
     |
     |_EDIR4
-    |   |_TEMP.DAT
+    |   |_temp.dat
     |
     |_GDIR5
 """

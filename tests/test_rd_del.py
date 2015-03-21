@@ -4,25 +4,27 @@ script = r"""
 MD Dir1
 MD Dir1\Dir2
 CD Dir1
-MD EDir4
-MD GDir5
+MD Dir4
+MD Dir5
 MD Dir2\Dir3
 MF Dir2\Dir3\readme.txt
-CD EDir4
+MF Dir2\Dir3\file1.txt
+CD Dir4
 MF temp.dat
+DEL C:\Dir1\Dir2\Dir3\readme.txt
+DEL C:\Dir1\Dir2\Dir3\file1.txt
+RD C:\Dir1\Dir2\Dir3
 """
 
 expected = r"""
 C:
 |_DIR1
     |_DIR2
-    |   |_DIR3
-    |       |_readme.txt
     |
-    |_EDIR4
+    |_DIR4
     |   |_temp.dat
     |
-    |_GDIR5
+    |_DIR5
 """
 
 import test
