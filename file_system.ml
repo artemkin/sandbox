@@ -17,48 +17,29 @@ let rec find_dir nodes = function
       match t, node with
       | [], Dir _ -> Some node
       | _, Dir nodes -> find_dir nodes t
-      | _, _ -> None
+      | _ -> None
 
-let create_dir node path =
+let modify_node nodes path ~f =
   with_return (fun r ->
-      let rec loop node = function
+      let rec loop nodes = function
         | [] -> assert false
+        | [h] ->
+          Map.change nodes h (fun node ->
+              match f node with
+              | `Create_or_modify node -> Some node
+              | `Remove -> None
+              | `Error -> r.return None)
         | h :: t ->
-          match t, node with
-          | [], Dir nodes ->
-            let nodes = Map.change nodes h (function
-                | Some _ -> r.return None
-                | None -> Some (Dir String.Map.empty)) in
-            Some (Dir nodes)
-          | _, Dir nodes ->
-            let nodes = Map.change nodes h (function
-                | None -> r.return None
-                | Some node -> loop node t) in
-            Some (Dir nodes)
-          | _, _ -> Some node
+          Map.change nodes h (function
+              | None -> r.return None
+              | Some node ->
+                match node with
+                | File -> Some node
+                | Dir nodes ->
+                  let nodes = loop nodes t in
+                  Some (Dir nodes))
       in
-      loop node path)
-
-let create_file node path =
-  with_return (fun r ->
-      let rec loop node = function
-        | [] -> assert false
-        | h :: t ->
-          match t, node with
-          | [], Dir nodes ->
-            let nodes = Map.change nodes h (function
-                | Some _ -> r.return None
-                | None -> Some File) in
-            Some (Dir nodes)
-          | _, Dir nodes ->
-            let nodes = Map.change nodes h (function
-                | None -> r.return None
-                | Some node -> loop node t) in
-            Some (Dir nodes)
-          | _, _ -> Some node
-      in
-      loop node path
-    )
+      Some (loop nodes path))
 
 let rec print_nodes prefix nodes =
   let print_name prefix name = printf "%s|_%s\n" prefix name in
@@ -85,41 +66,40 @@ let create drive =
   { root; cd = [drive] }
 
 
-let change_dir t path =
+let with_parsed_path t path ~f =
   match Path.of_string path with
   | None -> Error `Wrong_path
   | Some { kind; path; name } ->
     let path = (match kind with Absolute -> path | Relative -> t.cd @ path) in
-    let path = path @ [name] in
-    match find_dir t.root path with
-    | None -> Error `Wrong_path
-    | Some _ -> Ok { root = t.root; cd = path }
+    f path name
+
+let change_dir t path =
+  with_parsed_path t path ~f:(fun path name ->
+      let path = path @ [name] in
+      match find_dir t.root path with
+      | None -> Error `Wrong_path
+      | Some _ -> Ok { t with cd = path })
 
 let make_dir t path =
-  match Path.of_string path with
-  | None -> Error `Wrong_path
-  | Some { kind; path; name } ->
-    let path = (match kind with Absolute -> path | Relative -> t.cd @ path) in
-    let path = path @ [name] in
-    match create_dir (Dir t.root) path with
-    | None -> Error `Wrong_path
-    | Some root ->
-      match root with
-      | File -> assert false
-      | Dir nodes -> Ok { root = nodes; cd = t.cd }
+  with_parsed_path t path ~f:(fun path name ->
+      let path = path @ [name] in
+      modify_node t.root path ~f:(function
+        | Some _ -> `Error
+        | None -> `Create_or_modify (Dir String.Map.empty))
+      |> function
+        | None -> Error `Wrong_path
+        | Some root -> Ok { t with root })
 
 let make_file t path =
-  match Path.of_string path with
-  | None -> Error `Wrong_path
-  | Some { kind; path; name } ->
-    let path = (match kind with Absolute -> path | Relative -> t.cd @ path) in
-    let path = path @ [name] in
-    match create_file (Dir t.root) path with
-    | None -> Error `Wrong_path
-    | Some root ->
-      match root with
-      | File -> assert false
-      | Dir nodes -> Ok { root = nodes; cd = t.cd }
+  with_parsed_path t path ~f:(fun path name ->
+      let path = path @ [name] in
+      modify_node t.root path ~f:(function
+        | Some _ -> `Error
+        | None -> `Create_or_modify File)
+      |> function
+        | None -> Error `Wrong_path
+        | Some root -> Ok { t with root })
+
 
 let print t drive =
   match Map.find_exn t.root drive with
