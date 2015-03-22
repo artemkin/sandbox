@@ -18,6 +18,9 @@ let print_error = function
   | `File_not_found -> print_endline "File not found"
   | `File_already_exists -> print_endline "File already exists"
   | `Not_file -> print_endline "This is not file"
+  | `Already_exists -> print_endline "Already exists"
+  | `Destination_not_found -> print_endline "Destination not found"
+  | `Source_not_found -> print_endline "Source not found"
 
 let run_command fs command path =
   match command with
@@ -27,6 +30,11 @@ let run_command fs command path =
   | "RD" -> File_system.remove_dir fs path
   | "DEL" -> File_system.remove_file fs path
   | "DELTREE" -> File_system.remove_tree fs path
+  | _ -> Error (`Unknown_command_name command)
+
+let run_command_2 fs command path1 path2 =
+  match command with
+  | "COPY" -> File_system.copy fs path1 path2
   | _ -> Error (`Unknown_command_name command)
 
 let () =
@@ -41,6 +49,7 @@ let () =
       | Ok fs ->
         match skip_blank (String.split str ~on:' ') with
         | [command; path] -> run_command fs command path
+        | [command; path1; path2] -> run_command_2 fs command path1 path2
         | _ -> Error `Wrong_command)
   |> function
   | Error err -> print_error err
