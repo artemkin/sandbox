@@ -26,6 +26,7 @@ let run_command fs command path =
   | "MF" -> File_system.make_file fs path
   | "RD" -> File_system.remove_dir fs path
   | "DEL" -> File_system.remove_file fs path
+  | "DELTREE" -> File_system.remove_tree fs path
   | _ -> Error (`Unknown_command_name command)
 
 let () =

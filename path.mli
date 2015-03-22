@@ -1,8 +1,11 @@
 
-type kind = Absolute | Relative
+type path_kind = Absolute_path | Relative_path
+
+type name_kind = File_name | Dir_name | File_or_dir_name
 
 type t = {
-  kind : kind;
+  path_kind : path_kind;
+  name_kind : name_kind;
   path : string list;
   name : string;
 }

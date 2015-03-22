@@ -1,6 +1,6 @@
 
 (*
- * TODO
+ * TODO: Already implemented. Add test cases
  * It seems we need to support trailing backslashes:
  * 1. "C:\\DIR1\\" - valid dir name
  * 2. "C:\\DIR1\\" - invalid file name
@@ -10,12 +10,15 @@
 
 open Core.Std
 
-type kind = Absolute | Relative
+type path_kind = Absolute_path | Relative_path
+
+type name_kind = File_name | Dir_name | File_or_dir_name
 
 type t = {
-  kind: kind;
-  path: string list;
-  name: string
+  path_kind : path_kind;
+  name_kind : name_kind;
+  path : string list;
+  name : string;
 }
 
 let is_valid_drive_name str =
@@ -34,28 +37,41 @@ let is_valid_file_name str =
     String.for_all ext ~f:Char.is_alphanum
   | _ -> false
 
+let get_name_kind ~trailing_backslash ~file_only =
+  match trailing_backslash, file_only with
+  | false, false -> Some File_or_dir_name
+  | false, true -> Some File_name
+  | true, false -> Some Dir_name
+  | true, true -> None
+
 let parse_and_validate_path path =
-  let rec loop acc ~first ~absolute = function
-    | [] ->
+  let rec loop acc ~first ~absolute ~file_only = function
+    | [] | [""] as t ->
       if first then None
-      else Some {
-          kind = (if absolute then Absolute else Relative);
-          path = List.rev (List.tl_exn acc);
-          name = List.hd_exn acc;
-        }
+      else
+        let trailing_backslash = t = [""] in
+        get_name_kind ~trailing_backslash ~file_only
+        |> Option.map ~f:(fun name_kind ->
+            {
+              path_kind = (if absolute then Absolute_path else Relative_path);
+              name_kind;
+              path = List.rev (List.tl_exn acc);
+              name = List.hd_exn acc;
+            })
     | h :: t ->
-      let last = t = [] in
+      let last = t = [] || t = [""] in
       let drive = first && is_valid_drive_name h in
       let directory = is_valid_directory_name h in
-      let file = last && is_valid_file_name h in
-      if drive || directory || file then
-        loop (h :: acc) ~first:false ~absolute:(absolute || drive) t
+      let file_only = last && not directory && is_valid_file_name h in
+      if drive || directory || file_only then
+        loop (h :: acc) ~first:false ~absolute:(absolute || drive) ~file_only t
       else
         None
   in
-  loop [] ~first:true ~absolute:false path
+  loop [] ~first:true ~absolute:false ~file_only:false path
 
 let of_string str =
-  String.split str ~on:'\\'
+  String.strip str
+  |> String.split ~on:'\\'
   |> parse_and_validate_path
 
