@@ -13,14 +13,13 @@ let print_error = function
   | `Can't_remove_current_directory -> print_endline "Can't remove current directory"
   | `Dir_not_found -> print_endline "Directory not found"
   | `Dir_not_empty -> print_endline "Directory not empty"
-  | `Dir_already_exists -> print_endline "Directory already exists"
   | `Not_dir -> print_endline "This is not directory"
   | `File_not_found -> print_endline "File not found"
-  | `File_already_exists -> print_endline "File already exists"
   | `Not_file -> print_endline "This is not file"
   | `Already_exists -> print_endline "Already exists"
   | `Destination_not_found -> print_endline "Destination not found"
   | `Source_not_found -> print_endline "Source not found"
+  | `Hard_linked -> print_endline "Hard linked"
 
 let run_command fs command path =
   match command with
@@ -29,17 +28,18 @@ let run_command fs command path =
   | "MF" -> File_system.make_file fs path
   | "RD" -> File_system.remove_dir fs path
   | "DEL" -> File_system.remove_file fs path
-  | "DELTREE" -> File_system.remove_tree fs path
+  | "DELTREE" -> File_system.remove_dir_recursive fs path
   | _ -> Error (`Unknown_command_name command)
 
-let run_command_2 fs command path1 path2 =
+let run_command_2 fs command src dest =
   match command with
-  | "COPY" -> File_system.copy fs path1 path2
+  | "COPY" -> File_system.copy fs ~src ~dest
+  | "MHL" -> File_system.make_link fs ~link_kind:File_system.Hard_link ~src ~dest
+  | "MDL" -> File_system.make_link fs ~link_kind:File_system.Dynamic_link ~src ~dest
   | _ -> Error (`Unknown_command_name command)
 
 let () =
-  let drive = "C:" in
-  let fs = File_system.create drive in
+  let fs = File_system.empty in
   In_channel.input_lines stdin
   |> skip_blank
   |> List.map ~f:String.uppercase
@@ -53,5 +53,5 @@ let () =
         | _ -> Error `Wrong_command)
   |> function
   | Error err -> print_error err
-  | Ok fs -> File_system.print fs drive
+  | Ok fs -> File_system.print fs
 

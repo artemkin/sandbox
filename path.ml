@@ -14,12 +14,13 @@ type path_kind = Absolute_path | Relative_path
 
 type name_kind = File_name | Dir_name | File_or_dir_name
 
-type t = {
-  path_kind : path_kind;
-  name_kind : name_kind;
-  path : string list;
-  name : string;
-}
+type t =
+  { path_kind : path_kind;
+    name_kind : name_kind;
+    path : string list;
+    name : string;
+    path_name : string list;
+  }
 
 let is_valid_drive_name str =
   String.length str = 2 && Char.is_alpha str.[0] && str.[1] = ':'
@@ -44,19 +45,26 @@ let get_name_kind ~trailing_backslash ~file_only =
   | true, false -> Some Dir_name
   | true, true -> None
 
-let parse_and_validate_path path =
+let merge_name_kinds k1 k2 =
+  match k1, k2 with
+  | File_or_dir_name, File_or_dir_name -> Some File_or_dir_name
+  | File_name, Dir_name | Dir_name, File_name -> None
+  | File_name, _ | _, File_name -> Some File_name
+  | Dir_name, _ | _, Dir_name -> Some Dir_name
+
+let parse_and_validate_path ~name_kind path =
   let rec loop acc ~first ~absolute ~file_only = function
     | [] | [""] as t ->
       if first then None
       else
         let trailing_backslash = t = [""] in
-        get_name_kind ~trailing_backslash ~file_only
+        Option.bind (get_name_kind ~trailing_backslash ~file_only) (merge_name_kinds name_kind)
         |> Option.map ~f:(fun name_kind ->
-            {
-              path_kind = (if absolute then Absolute_path else Relative_path);
+            { path_kind = (if absolute then Absolute_path else Relative_path);
               name_kind;
               path = List.rev (List.tl_exn acc);
               name = List.hd_exn acc;
+              path_name = List.rev acc;
             })
     | h :: t ->
       let last = t = [] || t = [""] in
@@ -70,8 +78,34 @@ let parse_and_validate_path path =
   in
   loop [] ~first:true ~absolute:false ~file_only:false path
 
-let of_string str =
+let of_string ?(name_kind = File_or_dir_name) str =
   String.strip str
+  |> String.uppercase
   |> String.split ~on:'\\'
-  |> parse_and_validate_path
+  |> parse_and_validate_path ~name_kind
+
+let to_string ?(name_kind = File_or_dir_name) t =
+  let concat name = String.concat ~sep:"\\" t.path ^ "\\" ^ name in
+  match merge_name_kinds name_kind t.name_kind with
+  | None -> None
+  | Some File_name -> Some (concat (String.lowercase t.name))
+  | Some _ -> Some (concat t.name)
+
+let to_string_exn ?(name_kind = File_or_dir_name) t =
+  Option.value_exn (to_string ~name_kind t)
+
+let concat t1 t2 =
+  let open Option.Monad_infix in
+  (match t1.path_kind, t2.path_kind with
+   | (Absolute_path | Relative_path), Absolute_path -> None
+   | (Absolute_path | Relative_path) as kind, Relative_path -> Some kind)
+  >>= fun path_kind ->
+  (match t1.name_kind, t2.name_kind with
+   | File_name, _ -> None
+   | (Dir_name | File_or_dir_name),
+     ((Dir_name | File_name | File_or_dir_name) as kind) -> Some kind)
+  >>| fun name_kind ->
+  let path = t1.path_name @ t2.path in
+  let name = t2.name in
+  { path_kind; name_kind; path; name; path_name = path @ [name]; }
 
