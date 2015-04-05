@@ -181,6 +181,13 @@ let remove_dlinks_and_update_link_counters nodes { Link_info.dlinked; links; _ }
   in
   Map.filter_mapi nodes ~f:(f ~path:"")
 
+let rec reset_link_counters = function
+  | File _ -> File Link_counters.empty
+  | Link (_, _) as link -> link
+  | Dir (nodes, _) ->
+    let nodes = Map.map nodes ~f:reset_link_counters in
+    Dir (nodes, Link_counters.empty)
+
 let increment_link nodes ~link_kind path =
   let name_kind = ref Path.File_or_dir_name in
   let root = modify_node nodes path ~f:(function
