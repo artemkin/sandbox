@@ -13,9 +13,9 @@ type t =
 
 val of_string : ?name_kind:name_kind -> string -> t option
 
-val to_string : ?name_kind:name_kind -> t -> string option
-
-val to_string_exn : ?name_kind:name_kind -> t -> string
+val to_string : t -> string
 
 val concat : t -> t -> t option
+
+val concat_path_name : path:string -> name:string -> string
 

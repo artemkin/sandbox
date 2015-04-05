@@ -84,15 +84,7 @@ let of_string ?(name_kind = File_or_dir_name) str =
   |> String.split ~on:'\\'
   |> parse_and_validate_path ~name_kind
 
-let to_string ?(name_kind = File_or_dir_name) t =
-  let concat name = String.concat ~sep:"\\" t.path ^ "\\" ^ name in
-  match merge_name_kinds name_kind t.name_kind with
-  | None -> None
-  | Some File_name -> Some (concat (String.lowercase t.name))
-  | Some _ -> Some (concat t.name)
-
-let to_string_exn ?(name_kind = File_or_dir_name) t =
-  Option.value_exn (to_string ~name_kind t)
+let to_string t = String.concat ~sep:"\\" t.path_name
 
 let concat t1 t2 =
   let open Option.Monad_infix in
@@ -108,4 +100,6 @@ let concat t1 t2 =
   let path = t1.path_name @ t2.path in
   let name = t2.name in
   { path_kind; name_kind; path; name; path_name = path @ [name]; }
+
+let concat_path_name ~path ~name = path ^ "\\" ^ name
 

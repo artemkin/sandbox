@@ -22,7 +22,7 @@ end
 type node =
   | File of Link_counters.t
   | Dir of node String.Map.t * Link_counters.t
-  | Link of link_kind
+  | Link of link_kind * Path.name_kind
 
 type t =
   { root: node String.Map.t;
@@ -72,7 +72,7 @@ let remove_links nodes ~name =
     | Dir (nodes, counters) ->
       let nodes = Map.filter_mapi nodes ~f in
       Some (Dir (nodes, counters))
-    | Link Dynamic_link | Link Hard_link ->
+    | Link ((Dynamic_link | Hard_link), _) ->
       if key = name then None else Some data
   in
   Map.filter_mapi nodes ~f
@@ -86,7 +86,7 @@ let rec print_nodes nodes ~prefix =
          | File _ ->
            print_name prefix (String.lowercase key);
            true, false
-         | Link kind ->
+         | Link (kind, name_kind) -> (* TODO add correct printing using name_kind *)
            let kind = match kind with Hard_link -> "hlink" | Dynamic_link -> "dlink" in
            let link = sprintf "%s[%s]" kind key in
            print_name prefix link;
@@ -110,32 +110,32 @@ module Link_info = struct
       links: Link_counters.t String.Table.t;
     }
 
-  let change_hlinked count ~op = function
-    | None -> Some (op 0 count)
+  let change_hlinked count = function
+    | None -> Some count
     | Some n ->
-      let n' = op n count in
+      let n' = n + count in
       if n' = 0 then None else Some n'
 
   let update t path_name (counters: Link_counters.t) =
     if counters.dlinks <> 0 then Hashtbl.add_exn t.dlinked ~key:path_name ~data:();
     if counters.hlinks <> 0 then Hashtbl.change t.hlinked path_name
-          (change_hlinked counters.hlinks ~op:(+))
+          (change_hlinked counters.hlinks)
 
   let of_node ~path ~name node =
     let create = String.Table.create in
     let t = { dlinked = create (); hlinked = create (); links = create () } in
     let rec loop ~path ~name = function
-      | File counters -> update t (path ^ "\\" ^ (String.lowercase name)) counters
+      | File counters -> update t (Path.concat_path_name ~path ~name) counters
       | Dir (nodes, counters) ->
-        let path = path ^ "\\" ^ name in
+        let path = (Path.concat_path_name ~path ~name) in
         update t path counters;
         Map.iter nodes ~f:(fun ~key ~data -> loop ~path ~name:key data)
-      | Link kind ->
+      | Link (kind, _) ->
         Hashtbl.change t.links name (function
             | None -> Some Link_counters.empty
             | Some counters -> Some (Link_counters.succ counters kind));
         if kind = Hard_link then Hashtbl.change t.hlinked name
-              (change_hlinked 1 ~op:(-));
+              (change_hlinked (-1));
     in
     loop ~path ~name node;
     t
@@ -187,7 +187,7 @@ let try_to_remove_with_links path counters =
   | `No_links -> `Remove
   | `Hard_links -> `Report_error `Hard_linked
   | `Dynamic_links_only ->
-    let name = Path.to_string_exn path in
+    let name = Path.to_string path in
     `Remove_and_continue (remove_links ~name)
 
 let remove_dir t path =
@@ -266,11 +266,11 @@ let make_link t ~link_kind ~src ~dest =
                   | None -> `Report_error `Destination_not_found
                   | Some (File _ | Link _) -> `Report_error `Not_dir
                   | Some (Dir (nodes, counters)) ->
-                    let name = Path.to_string_exn ~name_kind src in
+                    let name = Path.to_string src in
                     let nodes = Map.change nodes name (function
                         | Some (File _ | Dir _) -> r.return (Error `Wrong_path)
                         | Some (Link _) -> r.return (Ok t) (* existing link is not treated as error *)
-                        | None -> Some (Link link_kind))
+                        | None -> Some (Link (link_kind, name_kind)))
                     in
                     `Create_or_modify (Dir (nodes, counters)))
               >>| fun root -> { t with root })))
