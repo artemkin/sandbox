@@ -29,10 +29,46 @@ type node =
   | Dir of node String.Map.t * Link_counters.t
   | Link of link_kind * Path.name_kind
 
-type t =
-  { root: node String.Map.t;
-    cd: Path.t;
-  }
+module Link_info = struct
+  type t =
+    { dlinked: unit String.Table.t;
+      hlinked: int String.Table.t;
+      links: Link_counters.t String.Table.t;
+    }
+
+  let update t path_name (counters: Link_counters.t) =
+    if counters.dlinks <> 0 then Hashtbl.add_exn t.dlinked ~key:path_name ~data:();
+    if counters.hlinks <> 0 then Hashtbl.add_exn t.hlinked ~key:path_name ~data:counters.hlinks
+
+  let create () =
+    let create = String.Table.create in
+    { dlinked = create (); hlinked = create (); links = create () }
+
+  let of_node ~path ~name node =
+    let t = create () in
+    let rec loop ~path ~name = function
+      | File counters -> update t (Path.concat_path_name ~path ~name) counters
+      | Dir (nodes, counters) ->
+        let path = (Path.concat_path_name ~path ~name) in
+        update t path counters;
+        Map.iter nodes ~f:(fun ~key ~data -> loop ~path ~name:key data)
+      | Link (kind, _) ->
+        Hashtbl.change t.links name (function
+            | None -> Some (Link_counters.succ Link_counters.empty kind)
+            | Some counters -> Some (Link_counters.succ counters kind))
+    in
+    loop ~path ~name node;
+    t
+
+  let get_hlinked_externally t =
+    Hashtbl.filter_mapi t.hlinked ~f:(fun ~key ~data ->
+        match Hashtbl.find t.links key with
+        | None -> Some ()
+        | Some { hlinks; dlinks = _ } -> if data = hlinks then None else Some ())
+end
+
+
+(* Auxiliary functions *)
 
 let rec find_node nodes = function
   | [] -> assert false
@@ -111,45 +147,6 @@ let rec print_nodes nodes ~prefix =
       then print_endline prefix;
       i - 1))
 
-
-module Link_info = struct
-  type t =
-    { dlinked: unit String.Table.t;
-      hlinked: int String.Table.t;
-      links: Link_counters.t String.Table.t;
-    }
-
-  let update t path_name (counters: Link_counters.t) =
-    if counters.dlinks <> 0 then Hashtbl.add_exn t.dlinked ~key:path_name ~data:();
-    if counters.hlinks <> 0 then Hashtbl.add_exn t.hlinked ~key:path_name ~data:counters.hlinks
-
-  let create () =
-    let create = String.Table.create in
-    { dlinked = create (); hlinked = create (); links = create () }
-
-  let of_node ~path ~name node =
-    let t = create () in
-    let rec loop ~path ~name = function
-      | File counters -> update t (Path.concat_path_name ~path ~name) counters
-      | Dir (nodes, counters) ->
-        let path = (Path.concat_path_name ~path ~name) in
-        update t path counters;
-        Map.iter nodes ~f:(fun ~key ~data -> loop ~path ~name:key data)
-      | Link (kind, _) ->
-        Hashtbl.change t.links name (function
-            | None -> Some (Link_counters.succ Link_counters.empty kind)
-            | Some counters -> Some (Link_counters.succ counters kind))
-    in
-    loop ~path ~name node;
-    t
-
-  let get_hlinked_externally t =
-    Hashtbl.filter_mapi t.hlinked ~f:(fun ~key ~data ->
-        match Hashtbl.find t.links key with
-        | None -> Some ()
-        | Some { hlinks; dlinks = _ } -> if data = hlinks then None else Some ())
-end
-
 let rec filter_node node ~path ~name can't_be_removed =
   let path = (Path.concat_path_name ~path ~name) in
   match node with
@@ -183,6 +180,28 @@ let remove_dlinks_and_update_link_counters nodes { Link_info.dlinked; links; _ }
       if Hashtbl.mem dlinked name then None else Some data
   in
   Map.filter_mapi nodes ~f:(f ~path:"")
+
+let increment_link nodes ~link_kind path =
+  let name_kind = ref Path.File_or_dir_name in
+  let root = modify_node nodes path ~f:(function
+      | None -> `Report_error `Source_not_found
+      | Some (Link _) -> `Report_error `Wrong_path
+      | Some (File counters) ->
+        name_kind := File_name;
+        `Create_or_modify (File (Link_counters.succ counters link_kind))
+      | Some (Dir (nodes, counters)) ->
+        name_kind := Dir_name;
+        `Create_or_modify (Dir (nodes, Link_counters.succ counters link_kind)))
+  in
+  Result.map root ~f:(fun root -> root, !name_kind)
+
+
+(* Commands *)
+
+type t =
+  { root: node String.Map.t;
+    cd: Path.t;
+  }
 
 let empty_dir = Dir (String.Map.empty, Link_counters.empty)
 let empty_file = File Link_counters.empty
@@ -291,20 +310,6 @@ let copy t ~src ~dest =
                       in
                       `Create_or_modify (Dir (nodes, counters))))
             |> Result.map ~f:(fun root -> { t with root })))
-
-let increment_link nodes ~link_kind path =
-  let name_kind = ref Path.File_or_dir_name in
-  let root = modify_node nodes path ~f:(function
-      | None -> `Report_error `Source_not_found
-      | Some (Link _) -> `Report_error `Wrong_path
-      | Some (File counters) ->
-        name_kind := File_name;
-        `Create_or_modify (File (Link_counters.succ counters link_kind))
-      | Some (Dir (nodes, counters)) ->
-        name_kind := Dir_name;
-        `Create_or_modify (Dir (nodes, Link_counters.succ counters link_kind)))
-  in
-  Result.map root ~f:(fun root -> root, !name_kind)
 
 let make_link t ~link_kind ~src ~dest =
   with_return (fun r ->
