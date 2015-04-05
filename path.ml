@@ -84,7 +84,9 @@ let of_string ?(name_kind = File_or_dir_name) str =
   |> String.split ~on:'\\'
   |> parse_and_validate_path ~name_kind
 
-let to_string t = String.concat ~sep:"\\" t.path_name
+let path_to_string t = String.concat ~sep:"\\" t.path
+
+let path_name_to_string t = String.concat ~sep:"\\" t.path_name
 
 let concat t1 t2 =
   let open Option.Monad_infix in
@@ -101,5 +103,8 @@ let concat t1 t2 =
   let name = t2.name in
   { path_kind; name_kind; path; name; path_name = path @ [name]; }
 
-let concat_path_name ~path ~name = path ^ "\\" ^ name
+let concat_path_name ~path ~name =
+  if path = "" then name else path ^ "\\" ^ name
+
+let split_path_name path_name = String.rsplit2_exn ~on:'\\' path_name
 

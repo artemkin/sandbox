@@ -13,9 +13,12 @@ type t =
 
 val of_string : ?name_kind:name_kind -> string -> t option
 
-val to_string : t -> string
+val path_to_string : t -> string
+
+val path_name_to_string : t -> string
 
 val concat : t -> t -> t option
 
 val concat_path_name : path:string -> name:string -> string
+val split_path_name : string -> string * string
 

@@ -12,6 +12,11 @@ module Link_counters = struct
     | Hard_link -> { t with hlinks = t.hlinks + 1 }
     | Dynamic_link -> { t with dlinks = t.dlinks + 1 }
 
+  let sub t1 t2 =
+    { hlinks = t1.hlinks - t2.hlinks;
+      dlinks = t1.dlinks - t2.dlinks
+    }
+
   let status t =
     match t.hlinks > 0, t.dlinks > 0 with
     | false, false -> `No_links
@@ -86,9 +91,13 @@ let rec print_nodes nodes ~prefix =
          | File _ ->
            print_name prefix (String.lowercase key);
            true, false
-         | Link (kind, name_kind) -> (* TODO add correct printing using name_kind *)
+         | Link (kind, name_kind) ->
+           let path_name = if name_kind <> File_name then key else
+               let path, name = Path.split_path_name key in
+               Path.concat_path_name ~path ~name:(String.lowercase name)
+           in
            let kind = match kind with Hard_link -> "hlink" | Dynamic_link -> "dlink" in
-           let link = sprintf "%s[%s]" kind key in
+           let link = sprintf "%s[%s]" kind path_name in
            print_name prefix link;
            true, false
          | Dir (nodes, _) ->
@@ -110,20 +119,16 @@ module Link_info = struct
       links: Link_counters.t String.Table.t;
     }
 
-  let change_hlinked count = function
-    | None -> Some count
-    | Some n ->
-      let n' = n + count in
-      if n' = 0 then None else Some n'
-
   let update t path_name (counters: Link_counters.t) =
     if counters.dlinks <> 0 then Hashtbl.add_exn t.dlinked ~key:path_name ~data:();
-    if counters.hlinks <> 0 then Hashtbl.change t.hlinked path_name
-          (change_hlinked counters.hlinks)
+    if counters.hlinks <> 0 then Hashtbl.add_exn t.hlinked ~key:path_name ~data:counters.hlinks
+
+  let create () =
+    let create = String.Table.create in
+    { dlinked = create (); hlinked = create (); links = create () }
 
   let of_node ~path ~name node =
-    let create = String.Table.create in
-    let t = { dlinked = create (); hlinked = create (); links = create () } in
+    let t = create () in
     let rec loop ~path ~name = function
       | File counters -> update t (Path.concat_path_name ~path ~name) counters
       | Dir (nodes, counters) ->
@@ -132,15 +137,52 @@ module Link_info = struct
         Map.iter nodes ~f:(fun ~key ~data -> loop ~path ~name:key data)
       | Link (kind, _) ->
         Hashtbl.change t.links name (function
-            | None -> Some Link_counters.empty
-            | Some counters -> Some (Link_counters.succ counters kind));
-        if kind = Hard_link then Hashtbl.change t.hlinked name
-              (change_hlinked (-1));
+            | None -> Some (Link_counters.succ Link_counters.empty kind)
+            | Some counters -> Some (Link_counters.succ counters kind))
     in
     loop ~path ~name node;
     t
+
+  let get_hlinked_externally t =
+    Hashtbl.filter_mapi t.hlinked ~f:(fun ~key ~data ->
+        match Hashtbl.find t.links key with
+        | None -> Some ()
+        | Some { hlinks; dlinks = _ } -> if data = hlinks then None else Some ())
 end
 
+let rec filter_node node ~path ~name can't_be_removed =
+  let path = (Path.concat_path_name ~path ~name) in
+  match node with
+  | Link (_, _) -> None
+  | File _ ->
+    if (Hashtbl.mem can't_be_removed path) then Some node else None
+  | Dir (nodes, counters) ->
+    let nodes = Map.filter_mapi nodes ~f:(fun ~key ~data ->
+        filter_node data ~path ~name:key can't_be_removed) in
+    if Map.length nodes > 0 || Hashtbl.mem can't_be_removed path
+    then Some (Dir (nodes, counters)) else None
+
+let remove_dlinks_and_update_link_counters nodes { Link_info.dlinked; links; _ } =
+  let update counters path =
+    match Hashtbl.find links path with
+    | None -> counters
+    | Some removed -> Link_counters.sub counters removed
+  in
+  let rec f ~path ~key:name ~data =
+    match data with
+    | File counters ->
+      let path = Path.concat_path_name ~path ~name in
+      Some (File (update counters path))
+    | Dir (nodes, counters) ->
+      let path = Path.concat_path_name ~path ~name in
+      let nodes = Map.filter_mapi nodes ~f:(f ~path) in
+      let counters = update counters path in
+      Some (Dir (nodes, counters))
+    | Link (Hard_link, _) -> Some data
+    | Link (Dynamic_link, _) ->
+      if Hashtbl.mem dlinked name then None else Some data
+  in
+  Map.filter_mapi nodes ~f:(f ~path:"")
 
 let empty_dir = Dir (String.Map.empty, Link_counters.empty)
 let empty_file = File Link_counters.empty
@@ -187,7 +229,7 @@ let try_to_remove_with_links path counters =
   | `No_links -> `Remove
   | `Hard_links -> `Report_error `Hard_linked
   | `Dynamic_links_only ->
-    let name = Path.to_string path in
+    let name = Path.path_name_to_string path in
     `Remove_and_continue (remove_links ~name)
 
 let remove_dir t path =
@@ -212,15 +254,24 @@ let remove_file t path =
       |> Result.map ~f:(fun root -> { t with root }))
 
 let remove_dir_recursive t path =
-  with_parsed_path t ~path ~name_kind:Dir_name ~f:(fun { path_name; _ } ->
-      let cd_prefix = List.take t.cd.path_name (List.length path_name) in
-      if path_name = cd_prefix then Error `Can't_remove_current_directory
-      else
-        modify_node t.root path_name ~f:(function
-            | None -> `Report_error `Dir_not_found
-            | Some (File _ | Link _) -> `Report_error `Not_dir
-            | Some (Dir (nodes, counters)) -> `Remove)        (* !!!!!!!!!!!! TODO *)
-        |> Result.map ~f:(fun root -> { t with root }))
+  with_parsed_path t ~path ~name_kind:Dir_name ~f:(fun p ->
+      let link_info = ref (Link_info.create ()) in
+      modify_node t.root p.path_name ~f:(function
+          | None -> `Report_error `Dir_not_found
+          | Some (File _ | Link _) -> `Report_error `Not_dir
+          | Some (Dir (_, _) as node) ->
+            let path = Path.path_to_string p in
+            let name = p.name in
+            link_info := Link_info.of_node ~path ~name node;
+            let can't_be_removed = Link_info.get_hlinked_externally !link_info in
+            let cd = (Path.path_name_to_string t.cd) in
+            ignore (Hashtbl.add can't_be_removed ~key:cd ~data:());
+            match filter_node node ~path ~name can't_be_removed with
+            | None -> `Remove
+            | Some node -> `Create_or_modify node)
+      |> Result.map ~f:(fun root ->
+          let root = remove_dlinks_and_update_link_counters root !link_info in
+          { t with root }))
 
 let copy t ~src ~dest =
   with_parsed_path t ~path:src ~name_kind:File_or_dir_name ~f:(fun src ->
@@ -266,7 +317,7 @@ let make_link t ~link_kind ~src ~dest =
                   | None -> `Report_error `Destination_not_found
                   | Some (File _ | Link _) -> `Report_error `Not_dir
                   | Some (Dir (nodes, counters)) ->
-                    let name = Path.to_string src in
+                    let name = Path.path_name_to_string src in
                     let nodes = Map.change nodes name (function
                         | Some (File _ | Dir _) -> r.return (Error `Wrong_path)
                         | Some (Link _) -> r.return (Ok t) (* existing link is not treated as error *)
