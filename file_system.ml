@@ -83,17 +83,16 @@ let rec find_node nodes = function
 
 let modify_node nodes path ~f =
   with_return (fun r ->
+    let cont = ref Fn.id in
       let rec loop nodes = function
         | [] -> assert false
         | [hd] ->
-          let cont = ref Fn.id in
           Map.change nodes hd (fun node ->
               match f node with
               | `Create_or_modify node -> Some node
               | `Remove -> None
               | `Remove_and_continue f -> cont := f; None
               | `Report_error err -> r.return (Error err))
-          |> !cont
         | hd :: tl ->
           Map.change nodes hd (function
               | None -> r.return (Error `Wrong_path)
@@ -104,7 +103,7 @@ let modify_node nodes path ~f =
                   let nodes = loop nodes tl in
                   Some (Dir (nodes, counters)))
       in
-      Ok (loop nodes path))
+      Ok (loop nodes path |> fun nodes -> !cont nodes))
 
 let remove_links nodes ~name =
   let rec f ~key ~data =
