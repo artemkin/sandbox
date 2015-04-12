@@ -12,9 +12,9 @@ module Link_counters = struct
     | Hard_link -> { t with hlinks = t.hlinks + 1 }
     | Dynamic_link -> { t with dlinks = t.dlinks + 1 }
 
-  let sub t1 t2 =
-    { hlinks = t1.hlinks - t2.hlinks;
-      dlinks = t1.dlinks - t2.dlinks
+  let map2 t1 t2 ~op =
+    { hlinks = op t1.hlinks t2.hlinks;
+      dlinks = op t1.dlinks t2.dlinks
     }
 
   let status t =
@@ -83,7 +83,7 @@ let rec find_node nodes = function
 
 let modify_node nodes path ~f =
   with_return (fun r ->
-    let cont = ref Fn.id in
+      let cont = ref Fn.id in
       let rec loop nodes = function
         | [] -> assert false
         | [hd] ->
@@ -105,17 +105,23 @@ let modify_node nodes path ~f =
       in
       Ok (loop nodes path |> fun nodes -> !cont nodes))
 
-let remove_links nodes ~name =
-  let rec f ~key ~data =
-    match data with
-    | File _ -> Some data
+let filter_map nodes ~path ~f =
+  let rec loop path ~key:name ~data:node =
+    match node with
     | Dir (nodes, counters) ->
-      let nodes = Map.filter_mapi nodes ~f in
-      Some (Dir (nodes, counters))
-    | Link ((Dynamic_link | Hard_link), _) ->
-      if key = name then None else Some data
+      let path' = Path.concat_path_name ~path ~name in
+      let nodes = Map.filter_mapi nodes ~f:(loop path') in
+      f ~path ~name (Dir (nodes, counters))
+    | File _ | Link ((Hard_link | Dynamic_link), _) -> f ~path ~name node
   in
-  Map.filter_mapi nodes ~f
+  Map.filter_mapi nodes ~f:(loop path)
+
+let remove_links nodes ~link_name =
+  filter_map nodes ~path:"" ~f:(fun ~path:_ ~name node ->
+      match node with
+      | Link ((Dynamic_link | Hard_link), _) ->
+        if link_name = name then None else Some node
+      | File _ | Dir (_, _) -> Some node)
 
 let rec print_nodes nodes ~prefix =
   let print_name prefix name = printf "%s|_%s\n" prefix name in
@@ -158,27 +164,23 @@ let rec filter_node node ~path ~name can't_be_removed =
     if Map.length nodes > 0 || Hashtbl.mem can't_be_removed path
     then Some (Dir (nodes, counters)) else None
 
-let remove_dlinks_and_update_link_counters nodes { Link_info.dlinked; links; _ } =
-  let update counters path =
-    match Hashtbl.find links path with
+let remove_dynamic_link links node ~name =
+  match node with
+  | File _ | Dir (_, _) | Link (Hard_link, _) -> Some node
+  | Link (Dynamic_link, _) ->
+    if Hashtbl.mem links name then None else Some node
+
+let update_link_counters links node ~path ~name ~op =
+  let update counters =
+    let path_name = Path.concat_path_name ~path ~name in
+    match Hashtbl.find links path_name with
     | None -> counters
-    | Some removed -> Link_counters.sub counters removed
+    | Some removed -> Link_counters.map2 counters removed ~op
   in
-  let rec f ~path ~key:name ~data =
-    match data with
-    | File counters ->
-      let path = Path.concat_path_name ~path ~name in
-      Some (File (update counters path))
-    | Dir (nodes, counters) ->
-      let path = Path.concat_path_name ~path ~name in
-      let nodes = Map.filter_mapi nodes ~f:(f ~path) in
-      let counters = update counters path in
-      Some (Dir (nodes, counters))
-    | Link (Hard_link, _) -> Some data
-    | Link (Dynamic_link, _) ->
-      if Hashtbl.mem dlinked name then None else Some data
-  in
-  Map.filter_mapi nodes ~f:(f ~path:"")
+  match node with
+  | File counters -> Some (File (update counters))
+  | Dir (nodes, counters) -> Some (Dir (nodes, update counters))
+  | Link ((Hard_link | Dynamic_link), _) -> Some node
 
 let rec reset_link_counters = function
   | File _ -> File Link_counters.empty
@@ -254,8 +256,8 @@ let try_to_remove_with_links path counters =
   | `No_links -> `Remove
   | `Hard_links -> `Report_error `Hard_linked
   | `Dynamic_links_only ->
-    let name = Path.path_name_to_string path in
-    `Remove_and_continue (remove_links ~name)
+    let link_name = Path.path_name_to_string path in
+    `Remove_and_continue (remove_links ~link_name)
 
 let remove_dir t path =
   with_parsed_path t ~path ~name_kind:Path.Dir_name ~f:(fun p ->
@@ -295,8 +297,12 @@ let remove_dir_recursive t path =
             | None -> `Remove
             | Some node -> `Create_or_modify node)
       |> Result.map ~f:(fun root ->
-          let root = remove_dlinks_and_update_link_counters root !link_info in
-          { t with root }))
+          let { Link_info.dlinked; links; _ } = !link_info in
+          filter_map root ~path:"" ~f:(fun ~path ~name node ->
+              Option.bind
+                (remove_dynamic_link dlinked node ~name)
+                (fun node -> update_link_counters links node ~path ~name ~op:(-)))
+          |> fun root -> { t with root }))
 
 let copy t ~src ~dest =
   with_parsed_path t ~path:src ~name_kind:File_or_dir_name ~f:(fun src ->
