@@ -89,7 +89,8 @@ let modify_node nodes path ~f =
         | [hd] ->
           Map.change nodes hd (fun node ->
               match f node with
-              | `Create_or_modify node -> Some node
+              | `Replace node -> Some node
+              | `Replace_and_continue (node, f) -> cont := f; Some node
               | `Remove -> None
               | `Remove_and_continue f -> cont := f; None
               | `Report_error err -> r.return (Error err))
@@ -196,10 +197,10 @@ let increment_link nodes ~link_kind path =
       | Some (Link _) -> `Report_error `Wrong_path
       | Some (File counters) ->
         name_kind := File_name;
-        `Create_or_modify (File (Link_counters.succ counters link_kind))
+        `Replace (File (Link_counters.succ counters link_kind))
       | Some (Dir (nodes, counters)) ->
         name_kind := Dir_name;
-        `Create_or_modify (Dir (nodes, Link_counters.succ counters link_kind)))
+        `Replace (Dir (nodes, Link_counters.succ counters link_kind)))
   in
   Result.map root ~f:(fun root -> root, !name_kind)
 
@@ -241,14 +242,14 @@ let make_dir t path =
   with_parsed_path t ~path ~name_kind:Dir_name ~f:(fun { path_name; _ } ->
       modify_node t.root path_name ~f:(function
           | Some _ -> `Report_error `Already_exists
-          | None -> `Create_or_modify empty_dir)
+          | None -> `Replace empty_dir)
       |> Result.map ~f:(fun root -> { t with root }))
 
 let make_file t path =
   with_parsed_path t ~path ~name_kind:File_name ~f:(fun { path_name; _ } ->
       modify_node t.root path_name ~f:(function
           | Some _ -> `Report_error `Already_exists
-          | None -> `Create_or_modify empty_file)
+          | None -> `Replace empty_file)
       |> Result.map ~f:(fun root -> { t with root }))
 
 let try_to_remove_with_links path counters =
@@ -295,7 +296,7 @@ let remove_dir_recursive t path =
             ignore (Hashtbl.add can't_be_removed ~key:cd ~data:());
             match filter_node node ~path ~name can't_be_removed with
             | None -> `Remove
-            | Some node -> `Create_or_modify node)
+            | Some node -> `Replace node)
       |> Result.map ~f:(fun root ->
           let { Link_info.dlinked; links; _ } = !link_info in
           filter_map root ~path:"" ~f:(fun ~path ~name node ->
@@ -303,6 +304,32 @@ let remove_dir_recursive t path =
                 (remove_dynamic_link dlinked node ~name)
                 (fun node -> update_link_counters links node ~path ~name ~op:(-)))
           |> fun root -> { t with root }))
+
+let try_to_copy (src: Path.t) src_node nodes counters =
+  with_return (fun r ->
+      let links = ref None in
+      let nodes = Map.change nodes src.name (function
+          | Some _ -> r.return (`Report_error `Already_exists)
+          | None ->
+            match src_node with
+            | Link _ -> assert false
+            | File _ -> Some src_node
+            | Dir (_, _) ->
+              let node = reset_link_counters src_node in
+              let path = Path.path_to_string src in
+              let name = src.name in
+              let link_info = Link_info.of_node ~path ~name node in
+              links := Some link_info.links;
+              Some node)
+      in
+      let node = Dir (nodes, counters) in
+      match !links with
+      | None -> `Replace node
+      | Some links when (Hashtbl.length links) = 0 -> `Replace node
+      | Some links ->
+        let cont = filter_map ~path:"" ~f:(fun ~path ~name node ->
+            update_link_counters links node ~path ~name ~op:(+)) in
+        `Replace_and_continue (node, cont))
 
 let copy t ~src ~dest =
   with_parsed_path t ~path:src ~name_kind:File_or_dir_name ~f:(fun src ->
@@ -314,13 +341,7 @@ let copy t ~src ~dest =
             modify_node t.root dest.path_name ~f:(function
                 | None -> `Report_error `Destination_not_found
                 | Some (File _ | Link _) -> `Report_error `Not_dir
-                | Some (Dir (nodes, counters)) ->   (* !!!!!!!!!!!!!  TODO *)
-                  with_return (fun r ->
-                      let nodes = Map.change nodes src.name (function
-                          | Some _ -> r.return (`Report_error `Already_exists)
-                          | None -> Some src_node)
-                      in
-                      `Create_or_modify (Dir (nodes, counters))))
+                | Some (Dir (nodes, counters)) -> try_to_copy src src_node nodes counters)
             |> Result.map ~f:(fun root -> { t with root })))
 
 let make_link t ~link_kind ~src ~dest =
@@ -340,7 +361,7 @@ let make_link t ~link_kind ~src ~dest =
                         | Some (Link _) -> r.return (Ok t) (* existing link is not treated as error *)
                         | None -> Some (Link (link_kind, name_kind)))
                     in
-                    `Create_or_modify (Dir (nodes, counters)))
+                    `Replace (Dir (nodes, counters)))
               >>| fun root -> { t with root })))
 
 let print t =
