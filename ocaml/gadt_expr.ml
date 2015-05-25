@@ -19,22 +19,6 @@ type _ expr_type =
 
 type any_expr = Expr : 'a expr_type * 'a expr -> any_expr
 
-(*
-let rec eval_aexpr = function
-  | Int_lit n -> n
-  | Add (a, b) -> (eval_aexpr a) + (eval_aexpr b)
-  | Sub (a, b) -> (eval_aexpr a) - (eval_aexpr b)
-  | Mul (a, b) -> (eval_aexpr a) * (eval_aexpr b)
-  | Div (a, b) -> (eval_aexpr a) / (eval_aexpr b)
-
-let rec eval_bexpr = function
-  | Bool_lit n -> n
-  | Lt  (a, b) -> (eval_aexpr a) <  (eval_aexpr b)
-  | Gt  (a, b) -> (eval_aexpr a) >  (eval_aexpr b)
-  | And (a, b) -> (eval_bexpr a) && (eval_bexpr b)
-  | Or  (a, b) -> (eval_bexpr a) || (eval_bexpr b)
-*)
-
 let rec eval : type a. a expr -> a = function
   | Int_lit n -> n
   | Bool_lit n -> n
@@ -244,6 +228,7 @@ let tests () =
   test "true and true" (`Bool true);
   test "(2+3<10-3) and 1<2" (`Bool true);
   test "2+3<10-3 and 1<2" (`Bool true);
+  test "1-2<1+2 and true or 3*2<1" (`Bool true);
   test "0<0" (`Bool false)
 
 let () =
