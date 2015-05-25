@@ -2,7 +2,8 @@
 open Genlex
 
 type _ expr =
-  | Num : int -> int expr
+  | Int_lit : int -> int expr
+  | Bool_lit : bool -> bool expr
   | Add : int expr * int expr -> int expr
   | Sub : int expr * int expr -> int expr
   | Mul : int expr * int expr -> int expr
@@ -18,21 +19,25 @@ type _ expr_type =
 
 type any_expr = Expr : 'a expr_type * 'a expr -> any_expr
 
+(*
 let rec eval_aexpr = function
-  | Num n -> n
+  | Int_lit n -> n
   | Add (a, b) -> (eval_aexpr a) + (eval_aexpr b)
   | Sub (a, b) -> (eval_aexpr a) - (eval_aexpr b)
   | Mul (a, b) -> (eval_aexpr a) * (eval_aexpr b)
   | Div (a, b) -> (eval_aexpr a) / (eval_aexpr b)
 
 let rec eval_bexpr = function
+  | Bool_lit n -> n
   | Lt  (a, b) -> (eval_aexpr a) <  (eval_aexpr b)
   | Gt  (a, b) -> (eval_aexpr a) >  (eval_aexpr b)
   | And (a, b) -> (eval_bexpr a) && (eval_bexpr b)
   | Or  (a, b) -> (eval_bexpr a) || (eval_bexpr b)
+*)
 
 let rec eval : type a. a expr -> a = function
-  | Num n -> n
+  | Int_lit n -> n
+  | Bool_lit n -> n
   | Add (a, b) -> (eval a) + (eval b)
   | Sub (a, b) -> (eval a) - (eval b)
   | Mul (a, b) -> (eval a) * (eval b)
@@ -47,7 +52,8 @@ let eval_expr : any_expr -> [> `Int of int | `Bool of bool] = function
   | Expr (Bool_expr, expr) -> `Bool (eval expr)
 
 let rec expr_to_string : type a. a expr -> string = function
-  | Num n -> string_of_int n
+  | Int_lit n -> string_of_int n
+  | Bool_lit n -> string_of_bool n
   | Add (a, b) -> "(" ^ (expr_to_string a) ^ "+" ^ (expr_to_string b) ^ ")"
   | Sub (a, b) -> "(" ^ (expr_to_string a) ^ "-" ^ (expr_to_string b) ^ ")"
   | Mul (a, b) -> "(" ^ (expr_to_string a) ^ "*" ^ (expr_to_string b) ^ ")"
@@ -118,9 +124,14 @@ let parse_expr s =
   let operators = Stack.create () in
   let rec loop () =
     match Stream.peek s with
-    | Some (`Num n) ->
+    | Some (`LITERAL lit) ->
       Stream.junk s;
-      Stack.push (Expr (Int_expr, (Num n))) expressions;
+      let expr =
+        (match lit with
+         | `Int n -> Expr (Int_expr, (Int_lit n))
+         | `Bool b -> Expr (Bool_expr, (Bool_lit b)))
+      in
+      Stack.push expr expressions;
       loop ()
     | Some `OPEN_PAREN ->
       Stream.junk s;
@@ -155,7 +166,7 @@ let parse_expr s =
   ex
 
 let lex_expr s =
-  let lexer = make_lexer ["+";"-";"*";"/";"<";">";"and";"or";"(";")"] in
+  let lexer = make_lexer ["+";"-";"*";"/";"<";">";"and";"or";"(";")";"true";"false"] in
   let tokens = lexer s in
   let prev_token = ref None in
   let next_token = ref None in
@@ -168,22 +179,24 @@ let lex_expr s =
           token
         | None ->
           match !prev_token, Stream.next tokens with
-          | _, Kwd "+"   -> Some (`OPERATOR `Add)
-          | _, Kwd "-"   -> Some (`OPERATOR `Sub)
-          | _, Kwd "*"   -> Some (`OPERATOR `Mul)
-          | _, Kwd "/"   -> Some (`OPERATOR `Div)
-          | _, Kwd "<"   -> Some (`OPERATOR `Lt)
-          | _, Kwd ">"   -> Some (`OPERATOR `Gt)
-          | _, Kwd "and" -> Some (`OPERATOR `And)
-          | _, Kwd "or"  -> Some (`OPERATOR `Or)
-          | _, Kwd "("   -> Some `OPEN_PAREN
-          | _, Kwd ")"   -> Some `CLOSE_PAREN
-          | None, Int n | Some _, Int n when n >= 0 -> Some (`Num n)
+          | _, Kwd "+"     -> Some (`OPERATOR `Add)
+          | _, Kwd "-"     -> Some (`OPERATOR `Sub)
+          | _, Kwd "*"     -> Some (`OPERATOR `Mul)
+          | _, Kwd "/"     -> Some (`OPERATOR `Div)
+          | _, Kwd "<"     -> Some (`OPERATOR `Lt)
+          | _, Kwd ">"     -> Some (`OPERATOR `Gt)
+          | _, Kwd "and"   -> Some (`OPERATOR `And)
+          | _, Kwd "or"    -> Some (`OPERATOR `Or)
+          | _, Kwd "("     -> Some `OPEN_PAREN
+          | _, Kwd ")"     -> Some `CLOSE_PAREN
+          | _, Kwd "true"  -> Some (`LITERAL (`Bool true))
+          | _, Kwd "false" -> Some (`LITERAL (`Bool false))
+          | None, Int n | Some _, Int n when n >= 0 -> Some (`LITERAL (`Int n))
           | Some prev_token, Int n -> (* replace -2 with - 2 if needed *)
             (match prev_token with
-             | `OPERATOR _ | `OPEN_PAREN -> Some (`Num n)
-             | `CLOSE_PAREN | `Num _ ->
-               next_token := Some (`Num (abs n));
+             | `OPERATOR _ | `OPEN_PAREN -> Some (`LITERAL (`Int n))
+             | `CLOSE_PAREN | `LITERAL _ ->
+               next_token := Some (`LITERAL (`Int (abs n)));
                Some (`OPERATOR `Sub))
           | _ -> failwith "Wrong token"
       in
@@ -223,6 +236,11 @@ let tests () =
   test "6/2-1 < 3 and 1 > (2+7)" (`Bool false);
   test "6/2-1 < 3 or 1 > (2+7)" (`Bool true);
   test "(2+3)<10-3" (`Bool true);
+  test "false and false" (`Bool false);
+  test "false and true" (`Bool false);
+  test "true and false" (`Bool false);
+  test "true and true" (`Bool true);
+  test "(2+3<10-3) and 1<2" (`Bool true);
   test "0<0" (`Bool false)
 
 let () =
