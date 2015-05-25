@@ -28,19 +28,15 @@ let precedence = function
   | `Mul -> 3
   | `Div -> 3
 
-let process_op stack op =
-  let prev_op =
-    if Stack.is_empty stack then None
-    else
-      match Stack.top stack with
-      | `OPEN_PAREN -> None
-      | `OPERATOR prev_op when precedence prev_op < precedence op -> None
-      | `OPERATOR prev_op ->
-        ignore (Stack.pop stack);
-        Some prev_op
-  in
-  Stack.push (`OPERATOR op) stack;
-  prev_op
+let get_prev_op stack op =
+  if Stack.is_empty stack then None
+  else
+    match Stack.top stack with
+    | `OPEN_PAREN -> None
+    | `OPERATOR prev_op when precedence prev_op < precedence op -> None
+    | `OPERATOR prev_op ->
+      ignore (Stack.pop stack);
+      Some prev_op
 
 let apply_op exprs op =
   let b = Stack.pop exprs in
@@ -53,6 +49,7 @@ let apply_op exprs op =
   in
   Stack.push expr exprs
 
+(* Shunting-yard algorithm *)
 let parse_expr s =
   let expressions = Stack.create () in
   let operators = Stack.create () in
@@ -68,20 +65,26 @@ let parse_expr s =
       loop ()
     | Some `CLOSE_PAREN ->
       Stream.junk s;
-      let rec apply_prev_ops () =
+      let rec apply () =
         match Stack.pop operators with
         | `OPEN_PAREN -> ()
         | `OPERATOR op ->
           apply_op expressions op;
-          apply_prev_ops ()
+          apply ()
       in
-      apply_prev_ops ();
+      apply ();
       loop ()
     | Some (`OPERATOR op) ->
       Stream.junk s;
-      (match process_op operators op with
-       | None -> ()
-       | Some op -> apply_op expressions op);
+      let rec apply () =
+        match get_prev_op operators op with
+        | None ->
+          Stack.push (`OPERATOR op) operators;
+        | Some op ->
+          apply_op expressions op;
+          apply ()
+      in
+      apply ();
       loop ()
     | None -> ()
   in
@@ -152,6 +155,8 @@ let tests () =
   test "2- -2" 4;
   test "(-2+3)" 1;
   test "(3-1)-2" 0;
+  test "2*3*4-5*2" 14;
+  test "2*3-4/2+7*3" 25;
   test "3-2" 1
 
 let () =
