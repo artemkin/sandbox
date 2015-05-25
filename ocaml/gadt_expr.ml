@@ -66,37 +66,76 @@ let process_op stack op =
   Stack.push (`OPERATOR op) stack;
   prev_op
 
+
+type _ ty =
+  | TyInt : int ty
+  | TyBool : bool ty
+
+type any_expr = Any : 'a ty * 'a expr -> any_expr
+
+let create_expr op a b =
+  match op, a, b with
+  | `Add, Any (TyInt,  a), Any (TyInt,  b) -> Any (TyInt,  Add (a, b))
+  | `Sub, Any (TyInt,  a), Any (TyInt,  b) -> Any (TyInt,  Sub (a, b))
+  | `Mul, Any (TyInt,  a), Any (TyInt,  b) -> Any (TyInt,  Mul (a, b))
+  | `Div, Any (TyInt,  a), Any (TyInt,  b) -> Any (TyInt,  Div (a, b))
+  | `Lt,  Any (TyInt,  a), Any (TyInt,  b) -> Any (TyBool, Lt  (a, b))
+  | `Gt,  Any (TyInt,  a), Any (TyInt,  b) -> Any (TyBool, Gt  (a, b))
+  | `And, Any (TyBool, a), Any (TyBool, b) -> Any (TyBool, And (a, b))
+  | `Or,  Any (TyBool, a), Any (TyBool, b) -> Any (TyBool, Or  (a, b))
+  | _, _, _ -> assert false
+
+let eval_any : any_expr -> [> `Int of int | `Bool of bool] = function
+  | Any (TyInt, expr) -> `Int (eval expr)
+  | Any (TyBool, expr) -> `Bool (eval expr)
+
+(*
+type result = Result : 'a ty * 'a -> result
+
+let eval_any = function
+  | Any (TyInt, expr) -> Result (TyInt, (eval expr))
+  | Any (TyBool, expr) -> Result (TyBool, (eval expr))
+
+
+let result_to_string = function
+  | Result (TyInt, n) -> string_of_int n
+  | Result (TyBool, n) -> string_of_bool n
+  *)
+
 (*
 let extract_expr (type v) (a:v expr) (b:v expr) =
   match a, b with
   | Add _ as a, Add _ as b -> a, b
   *)
 
-type expr' = Int_expr of int expr | Bool_expr of bool expr
+(* type expr' = Int_expr of int expr | Bool_expr of bool expr *)
 
-let concrete : type a. a expr -> expr' = function
-  | Num _ as expr -> Int_expr expr
-  | Add _ as expr -> Int_expr expr
-  | Sub _ as expr -> Int_expr expr
-  | Mul _ as expr -> Int_expr expr
-  | Div _ as expr -> Int_expr expr
-  | Lt  _ as expr -> Bool_expr expr
-  | Gt  _ as expr -> Bool_expr expr
-  | And _ as expr -> Bool_expr expr
-  | Or  _ as expr -> Bool_expr expr
+(*
+let concrete : any_expr -> expr' = function
+  | Any (Num _ as expr) -> Int_expr expr
+  | Any (Add _ as expr) -> Int_expr expr
+  | Any (Sub _ as expr) -> Int_expr expr
+  | Any (Mul _ as expr) -> Int_expr expr
+  | Any (Div _ as expr) -> Int_expr expr
+  | Any (Lt  _ as expr) -> Bool_expr expr
+  | Any (Gt  _ as expr) -> Bool_expr expr
+  | Any (And _ as expr) -> Bool_expr expr
+  | Any (Or  _ as expr) -> Bool_expr expr
 
-let create_expr (type a) op (a:a expr) (b:a expr) : a expr =
+let create_expr op a b =
   match op, concrete a, concrete b with
-  | `Add, Int_expr a, Int_expr b -> Add (a, b)
-  | `Sub, Int_expr a, Int_expr b -> Sub (a, b)
-  | `Mul, Int_expr a, Int_expr b -> Mul (a, b)
-  | `Div, Int_expr a, Int_expr b -> Div (a, b)
-  | `Lt,  Int_expr a, Int_expr b -> Lt  (a, b)
-  | `Gt,  Int_expr a, Int_expr b -> Gt  (a, b)
-  | `And, Bool_expr a, Bool_expr b -> And (a, b)
-  | `Or, Bool_expr a, Bool_expr b -> Or (a, b)
+  | `Add, Int_expr  a, Int_expr  b -> Any (Add (a, b))
+  | `Sub, Int_expr  a, Int_expr  b -> Any (Sub (a, b))
+  | `Mul, Int_expr  a, Int_expr  b -> Any (Mul (a, b))
+  | `Div, Int_expr  a, Int_expr  b -> Any (Div (a, b))
+  | `Lt,  Int_expr  a, Int_expr  b -> Any (Lt  (a, b))
+  | `Gt,  Int_expr  a, Int_expr  b -> Any (Gt  (a, b))
+  | `And, Bool_expr a, Bool_expr b -> Any (And (a, b))
+  | `Or,  Bool_expr a, Bool_expr b -> Any (Or  (a, b))
+  | _, _, _ -> assert false
+*)
 
-let apply_op (type a)  (exprs:(a expr) Stack.t) op =
+let apply_op (exprs:any_expr Stack.t) op =
   let b = Stack.pop exprs in
   let a = Stack.pop exprs in
   let expr =
@@ -192,7 +231,7 @@ let tests () =
   let test expr result =
     let s = Stream.of_string expr in
     lex_expr s |> parse_expr |> fun expr ->
-(*    Printf.printf "%s\n" (expr_to_string expr); *)
+    (*    Printf.printf "%s\n" (expr_to_string expr); *)
     eval_expr expr |> fun result' ->
     if result <> result' then assert false
   in
