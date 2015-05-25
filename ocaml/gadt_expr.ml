@@ -12,18 +12,24 @@ type _ expr =
   | And : bool expr * bool expr -> bool expr
   | Or : bool expr * bool expr -> bool expr
 
-let rec eval_expr = function
+type _ expr_type =
+  | Int_expr : int expr_type
+  | Bool_expr : bool expr_type
+
+type any_expr = Expr : 'a expr_type * 'a expr -> any_expr
+
+let rec eval_aexpr = function
   | Num n -> n
-  | Add (a, b) -> (eval_expr a) + (eval_expr b)
-  | Sub (a, b) -> (eval_expr a) - (eval_expr b)
-  | Mul (a, b) -> (eval_expr a) * (eval_expr b)
-  | Div (a, b) -> (eval_expr a) / (eval_expr b)
+  | Add (a, b) -> (eval_aexpr a) + (eval_aexpr b)
+  | Sub (a, b) -> (eval_aexpr a) - (eval_aexpr b)
+  | Mul (a, b) -> (eval_aexpr a) * (eval_aexpr b)
+  | Div (a, b) -> (eval_aexpr a) / (eval_aexpr b)
 
 let rec eval_bexpr = function
-  | Lt (a, b) -> (eval_expr a) < (eval_expr b)
-  | Gt (a, b) -> (eval_expr a) > (eval_expr b)
+  | Lt  (a, b) -> (eval_aexpr a) <  (eval_aexpr b)
+  | Gt  (a, b) -> (eval_aexpr a) >  (eval_aexpr b)
   | And (a, b) -> (eval_bexpr a) && (eval_bexpr b)
-  | Or (a, b) -> (eval_bexpr a) || (eval_bexpr b)
+  | Or  (a, b) -> (eval_bexpr a) || (eval_bexpr b)
 
 let rec eval : type a. a expr -> a = function
   | Num n -> n
@@ -35,6 +41,10 @@ let rec eval : type a. a expr -> a = function
   | Gt  (a, b) -> (eval a) > (eval b)
   | And (a, b) -> (eval a) && (eval b)
   | Or  (a, b) -> (eval a) || (eval b)
+
+let eval_expr : any_expr -> [> `Int of int | `Bool of bool] = function
+  | Expr (Int_expr, expr) -> `Int (eval expr)
+  | Expr (Bool_expr, expr) -> `Bool (eval expr)
 
 let rec expr_to_string : type a. a expr -> string = function
   | Num n -> string_of_int n
@@ -48,9 +58,22 @@ let rec expr_to_string : type a. a expr -> string = function
   | Or  (a, b) -> "(" ^ (expr_to_string a) ^ "|" ^ (expr_to_string b) ^ ")"
 
 let precedence = function
-  | `Lt | `Gt -> 1
-  | `Add | `Sub -> 2
-  | `Mul | `Div -> 3
+  | `Or         -> 1
+  | `And        -> 2
+  | `Lt  | `Gt  -> 3
+  | `Add | `Sub -> 4
+  | `Mul | `Div -> 5
+
+let op_to_string = function
+  | `Add -> "+"
+  | `Sub -> "-"
+  | `Mul -> "*"
+  | `Div -> "/"
+  | `Lt  -> "<"
+  | `Gt  -> ">"
+  | `And -> "and"
+  | `Or  -> "or"
+
 
 let process_op stack op =
   let prev_op =
@@ -67,85 +90,27 @@ let process_op stack op =
   prev_op
 
 
-type _ ty =
-  | TyInt : int ty
-  | TyBool : bool ty
-
-type any_expr = Any : 'a ty * 'a expr -> any_expr
-
-let create_expr op a b =
-  match op, a, b with
-  | `Add, Any (TyInt,  a), Any (TyInt,  b) -> Any (TyInt,  Add (a, b))
-  | `Sub, Any (TyInt,  a), Any (TyInt,  b) -> Any (TyInt,  Sub (a, b))
-  | `Mul, Any (TyInt,  a), Any (TyInt,  b) -> Any (TyInt,  Mul (a, b))
-  | `Div, Any (TyInt,  a), Any (TyInt,  b) -> Any (TyInt,  Div (a, b))
-  | `Lt,  Any (TyInt,  a), Any (TyInt,  b) -> Any (TyBool, Lt  (a, b))
-  | `Gt,  Any (TyInt,  a), Any (TyInt,  b) -> Any (TyBool, Gt  (a, b))
-  | `And, Any (TyBool, a), Any (TyBool, b) -> Any (TyBool, And (a, b))
-  | `Or,  Any (TyBool, a), Any (TyBool, b) -> Any (TyBool, Or  (a, b))
-  | _, _, _ -> assert false
-
-let eval_any : any_expr -> [> `Int of int | `Bool of bool] = function
-  | Any (TyInt, expr) -> `Int (eval expr)
-  | Any (TyBool, expr) -> `Bool (eval expr)
-
-(*
-type result = Result : 'a ty * 'a -> result
-
-let eval_any = function
-  | Any (TyInt, expr) -> Result (TyInt, (eval expr))
-  | Any (TyBool, expr) -> Result (TyBool, (eval expr))
-
-
-let result_to_string = function
-  | Result (TyInt, n) -> string_of_int n
-  | Result (TyBool, n) -> string_of_bool n
-  *)
-
-(*
-let extract_expr (type v) (a:v expr) (b:v expr) =
-  match a, b with
-  | Add _ as a, Add _ as b -> a, b
-  *)
-
-(* type expr' = Int_expr of int expr | Bool_expr of bool expr *)
-
-(*
-let concrete : any_expr -> expr' = function
-  | Any (Num _ as expr) -> Int_expr expr
-  | Any (Add _ as expr) -> Int_expr expr
-  | Any (Sub _ as expr) -> Int_expr expr
-  | Any (Mul _ as expr) -> Int_expr expr
-  | Any (Div _ as expr) -> Int_expr expr
-  | Any (Lt  _ as expr) -> Bool_expr expr
-  | Any (Gt  _ as expr) -> Bool_expr expr
-  | Any (And _ as expr) -> Bool_expr expr
-  | Any (Or  _ as expr) -> Bool_expr expr
-
-let create_expr op a b =
-  match op, concrete a, concrete b with
-  | `Add, Int_expr  a, Int_expr  b -> Any (Add (a, b))
-  | `Sub, Int_expr  a, Int_expr  b -> Any (Sub (a, b))
-  | `Mul, Int_expr  a, Int_expr  b -> Any (Mul (a, b))
-  | `Div, Int_expr  a, Int_expr  b -> Any (Div (a, b))
-  | `Lt,  Int_expr  a, Int_expr  b -> Any (Lt  (a, b))
-  | `Gt,  Int_expr  a, Int_expr  b -> Any (Gt  (a, b))
-  | `And, Bool_expr a, Bool_expr b -> Any (And (a, b))
-  | `Or,  Bool_expr a, Bool_expr b -> Any (Or  (a, b))
-  | _, _, _ -> assert false
-*)
-
-let apply_op (exprs:any_expr Stack.t) op =
+let apply_op exprs op =
+  let create_expr (Expr (a_type, a)) (Expr (b_type, b)) =
+    match op, a_type, a, b_type, b with
+    | `Add, Int_expr,  a, Int_expr,  b -> Expr (Int_expr,  Add (a, b))
+    | `Sub, Int_expr,  a, Int_expr,  b -> Expr (Int_expr,  Sub (a, b))
+    | `Mul, Int_expr,  a, Int_expr,  b -> Expr (Int_expr,  Mul (a, b))
+    | `Div, Int_expr,  a, Int_expr,  b -> Expr (Int_expr,  Div (a, b))
+    | `Lt,  Int_expr,  a, Int_expr,  b -> Expr (Bool_expr, Lt  (a, b))
+    | `Gt,  Int_expr,  a, Int_expr,  b -> Expr (Bool_expr, Gt  (a, b))
+    | `And, Bool_expr, a, Bool_expr, b -> Expr (Bool_expr, And (a, b))
+    | `Or,  Bool_expr, a, Bool_expr, b -> Expr (Bool_expr, Or  (a, b))
+    | (`Add | `Sub | `Mul | `Div | `Lt | `Gt | `And | `Or), _, a, _, b ->
+      let op = op_to_string op in
+      let a = expr_to_string a in
+      let b = expr_to_string b in
+      let err = Printf.sprintf "Operator '%s' applied to wrong operands: a(%s) b(%s)" op a b in
+      failwith err
+  in
   let b = Stack.pop exprs in
   let a = Stack.pop exprs in
-  let expr =
-    match op, concrete a, concrete b with
-    | `Add, Int_expr a, Int_expr b -> Add (a, b)
-    | `Sub, Int_expr a, Int_expr b -> Sub (a, b)
-    | `Mul, Int_expr a, Int_expr b -> Mul (a, b)
-    | `Div, Int_expr a, Int_expr b -> Div (a, b)
-    | `Lt, Int_expr a, Int_expr b -> Lt (a, b)
-  in
+  let expr = create_expr a b in
   Stack.push expr exprs
 
 let parse_expr s =
@@ -155,7 +120,7 @@ let parse_expr s =
     match Stream.peek s with
     | Some (`Num n) ->
       Stream.junk s;
-      Stack.push (Num n) expressions;
+      Stack.push (Expr (Int_expr, (Num n))) expressions;
       loop ()
     | Some `OPEN_PAREN ->
       Stream.junk s;
@@ -190,7 +155,7 @@ let parse_expr s =
   ex
 
 let lex_expr s =
-  let lexer = make_lexer ["+";"-";"*";"/";"(";")";"<";">"] in
+  let lexer = make_lexer ["+";"-";"*";"/";"<";">";"and";"or";"(";")"] in
   let tokens = lexer s in
   let prev_token = ref None in
   let next_token = ref None in
@@ -203,14 +168,16 @@ let lex_expr s =
           token
         | None ->
           match !prev_token, Stream.next tokens with
-          | _, Kwd "+" -> Some (`OPERATOR `Add)
-          | _, Kwd "-" -> Some (`OPERATOR `Sub)
-          | _, Kwd "*" -> Some (`OPERATOR `Mul)
-          | _, Kwd "/" -> Some (`OPERATOR `Div)
-          | _, Kwd "<" -> Some (`OPERATOR `Lt)
-          | _, Kwd ">" -> Some (`OPERATOR `Gt)
-          | _, Kwd "(" -> Some `OPEN_PAREN
-          | _, Kwd ")" -> Some `CLOSE_PAREN
+          | _, Kwd "+"   -> Some (`OPERATOR `Add)
+          | _, Kwd "-"   -> Some (`OPERATOR `Sub)
+          | _, Kwd "*"   -> Some (`OPERATOR `Mul)
+          | _, Kwd "/"   -> Some (`OPERATOR `Div)
+          | _, Kwd "<"   -> Some (`OPERATOR `Lt)
+          | _, Kwd ">"   -> Some (`OPERATOR `Gt)
+          | _, Kwd "and" -> Some (`OPERATOR `And)
+          | _, Kwd "or"  -> Some (`OPERATOR `Or)
+          | _, Kwd "("   -> Some `OPEN_PAREN
+          | _, Kwd ")"   -> Some `CLOSE_PAREN
           | None, Int n | Some _, Int n when n >= 0 -> Some (`Num n)
           | Some prev_token, Int n -> (* replace -2 with - 2 if needed *)
             (match prev_token with
@@ -235,18 +202,28 @@ let tests () =
     eval_expr expr |> fun result' ->
     if result <> result' then assert false
   in
-  test "2 + 2" 4;
-  test "2 + 4 + 3 * 2 - 4 / 2" 10;
-  test "2 + 2 + 2" 6;
-  test "(2 + 2)" 4;
-  test "2 + 4 + 3 * ( 2 - 4 ) / 2" 3;
-  test "2 - (3 * (4 - 1) ) / 2" (-2);
-  test "3 * ( ( 2 + 2 ) ) + 4" 16;
-  test "2+4+3*2-4/2" 10;
-  test "2- -2" 4;
-  test "(-2+3)" 1;
-  test "(3-1)-2" 0;
-  test "3-2" 1
+  test "2 + 2" (`Int 4);
+  test "2 + 4 + 3 * 2 - 4 / 2" (`Int 10);
+  test "2 + 2 + 2" (`Int 6);
+  test "(2 + 2)" (`Int 4);
+  test "((2 + 2))" (`Int 4);
+  test "(((2 + 2)))" (`Int 4);
+  test "(((2)+(2)))" (`Int 4);
+  test "2 + 4 + 3 * ( 2 - 4 ) / 2" (`Int 3);
+  test "2 - (3 * (4 - 1) ) / 2" (`Int (-2));
+  test "3 * ( ( 2 + 2 ) ) + 4" (`Int 16);
+  test "2+4+3*2-4/2" (`Int 10);
+  test "2- -2" (`Int 4);
+  test "(-2+3)" (`Int 1);
+  test "(3-1)-2" (`Int 0);
+  test "3-2" (`Int 1);
+  test "1<2" (`Bool true);
+  test "1>2" (`Bool false);
+  test "2+3<10-3" (`Bool true);
+  test "6/2-1 < 3 and 1 > (2+7)" (`Bool false);
+  test "6/2-1 < 3 or 1 > (2+7)" (`Bool true);
+  test "(2+3)<10-3" (`Bool true);
+  test "0<0" (`Bool false)
 
 let () =
   tests ()
