@@ -1,4 +1,5 @@
 
+(load "mk.scm")
 (load "pmatch.scm")
 
 (define lookup
@@ -25,4 +26,27 @@
             [(closure ,x ,body ,env)
               (eval-exp body `((,x . ,val) . ,env))]
             [,else (error 'eval-exp "wrong procedure")]))])))
+
+
+(define lookupo
+  (lambda (x env out)
+    (fresh (y v env^)
+      (== `((,y . ,v) . ,env^) env)
+      (conde
+        [(== x y) (== v out)]
+        [(=/= x y) (lookupo x env^ out)]))))
+
+(define eval-expo
+  (lambda (expr env out)
+    (conde
+      [(symbolo expr) (lookupo expr env out)]
+      [(numbero expr) (== expr out)]
+      [(fresh (x body)
+        (== `(lambda (,x) ,body) expr)
+        (== `(closure ,x ,body ,env) out))]
+      [(fresh (e1 e2 val x body env^)
+        (== `(,e1 ,e2) expr)
+        (eval-expo e1 env `(closure ,x ,body ,env^))
+        (eval-expo e2 env val)
+        (eval-expo body `((,x . ,val) . ,env^) out))])))
 
