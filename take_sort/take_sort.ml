@@ -10,7 +10,7 @@ let generate () =
   let rec aux acc = function
     | 0 -> acc
     | n ->
-      let num = Random.int 1073741823 in
+      let num = Random.int 100000000 in
       aux (num :: acc) (n - 1)
   in
   aux [] 10000000
@@ -23,6 +23,7 @@ let sort2 lst =
 
 let () =
   let rxs = generate () in
+  printf "Sorting...%!";
   let sorted = sort2 rxs in
   let result = List.take sorted 20 in
   List.iter result ~f:(fun n -> printf "%d " n);
