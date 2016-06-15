@@ -1,6 +1,4 @@
 
-// https://www.quora.com/How-would-you-write-a-C-program-to-print-1-to-100-without-loop-recursion-and-goto
-
 #ifdef GENERATE
 
 printf("%d\n", ++i);
