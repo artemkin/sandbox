@@ -15,8 +15,15 @@ let rec eval_expr = function
   | Mul (a, b) -> (eval_expr a) * (eval_expr b)
   | Div (a, b) -> (eval_expr a) / (eval_expr b)
 
+let format_int n =
+  let n' = string_of_int n in
+  if n < 0 then
+    "(" ^ n' ^ ")"
+  else
+    n'
+
 let rec expr_to_string = function
-  | Num n -> string_of_int n
+  | Num n -> format_int n
   | Add (a, b) -> "(" ^ (expr_to_string a) ^ "+" ^ (expr_to_string b) ^ ")"
   | Sub (a, b) -> "(" ^ (expr_to_string a) ^ "-" ^ (expr_to_string b) ^ ")"
   | Mul (a, b) -> "(" ^ (expr_to_string a) ^ "*" ^ (expr_to_string b) ^ ")"
@@ -137,8 +144,8 @@ let tests () =
   let test expr result =
     let s = Stream.of_string expr in
     lex_expr s |> parse_expr |> fun expr ->
-(*    Printf.printf "%s\n" (expr_to_string expr); *)
     eval_expr expr |> fun result' ->
+    Printf.printf "%s = %d\n" (expr_to_string expr) result';
     if result <> result' then assert false
   in
   test "2 + 2" 4;
@@ -153,6 +160,8 @@ let tests () =
   test "3 * ( ( 2 + 2 ) ) + 4" 16;
   test "2+4+3*2-4/2" 10;
   test "2- -2" 4;
+  test "2-(-2)" 4;
+  test "2/ -2" (-1);
   test "(-2+3)" 1;
   test "(3-1)-2" 0;
   test "2*3*4-5*2" 14;
