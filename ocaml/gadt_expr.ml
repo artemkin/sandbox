@@ -35,8 +35,15 @@ let eval_expr : any_expr -> [> `Int of int | `Bool of bool] = function
   | Expr (Int_expr, expr) -> `Int (eval expr)
   | Expr (Bool_expr, expr) -> `Bool (eval expr)
 
+let format_int n =
+  let n' = string_of_int n in
+  if n < 0 then
+    "(" ^ n' ^ ")"
+  else
+    n'
+
 let rec expr_to_string : type a. a expr -> string = function
-  | Int_lit n -> string_of_int n
+  | Int_lit n -> format_int n
   | Bool_lit n -> string_of_bool n
   | Add (a, b) -> "(" ^ (expr_to_string a) ^ "+" ^ (expr_to_string b) ^ ")"
   | Sub (a, b) -> "(" ^ (expr_to_string a) ^ "-" ^ (expr_to_string b) ^ ")"
@@ -46,6 +53,10 @@ let rec expr_to_string : type a. a expr -> string = function
   | Gt  (a, b) -> "(" ^ (expr_to_string a) ^ ">" ^ (expr_to_string b) ^ ")"
   | And (a, b) -> "(" ^ (expr_to_string a) ^ "&" ^ (expr_to_string b) ^ ")"
   | Or  (a, b) -> "(" ^ (expr_to_string a) ^ "|" ^ (expr_to_string b) ^ ")"
+
+let any_expr_to_string : any_expr -> string = function
+  | Expr (Int_expr, expr) -> expr_to_string expr
+  | Expr (Bool_expr, expr) -> expr_to_string expr
 
 let precedence = function
   | `Or         -> 1
@@ -193,12 +204,16 @@ let lex_expr s =
   in
   Stream.from next
 
+let format_result = function
+  | `Int n -> string_of_int n
+  | `Bool b -> string_of_bool b
+
 let tests () =
   let test expr result =
     let s = Stream.of_string expr in
     lex_expr s |> parse_expr |> fun expr ->
-    (*    Printf.printf "%s\n" (expr_to_string expr); *)
     eval_expr expr |> fun result' ->
+    Printf.printf "%s = %s\n" (any_expr_to_string expr) (format_result result');
     if result <> result' then assert false
   in
   test "2 + 2" (`Int 4);
