@@ -4,10 +4,12 @@ open Core
 let do_grep pattern ch =
   let f line =
     if String.is_substring line ~substring:pattern then begin
-      print_endline line
+      print_string line;
+      print_string "\n"
     end
   in
-  In_channel.iter_lines ch ~f
+  In_channel.iter_lines ch ~f;
+  Out_channel.flush stdout
 
 let grep pattern filename =
   if (filename = "-") then
@@ -19,7 +21,7 @@ let zstdgrep pattern filename =
   let p = Unix.open_process_in ("unzstd -c " ^ filename) in
   do_grep pattern p;
   let status = Unix.close_process_in p in
-  printf "unzstd exit status: %s" (Unix.Exit_or_signal.to_string_hum status)
+  eprintf "unzstd exit status: %s" (Unix.Exit_or_signal.to_string_hum status)
 
 let () =
   match Array.to_list Sys.argv |> List.tl_exn with
